@@ -69,6 +69,7 @@ export function CashPanel({ totalCash, investedAmount, currentPortfolioValue, on
                   onChange={(e) => setEditValue(e.target.value)}
                   className="w-12 text-sm font-semibold text-[#030507] font-['Roobert']"
                   onKeyDown={(e) => e.key === "Enter" && handleSave()}
+                  spellCheck={false}
                 />
                 <button onClick={handleSave} className="p-1 text-[#1B606F] hover:bg-[#86ECE4]/20 rounded">
                   <Check size={12} />

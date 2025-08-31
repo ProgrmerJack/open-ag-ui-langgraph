@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { useEffect, useState } from "react"
 import { CopilotChat } from "@copilotkit/react-ui"
 
 
@@ -11,6 +12,14 @@ interface PromptPanelProps {
 
 
 export function PromptPanel({ availableCash }: PromptPanelProps) {
+  // Read provider at build-time to align behavior with API route
+  const provider = (
+    process.env.NEXT_PUBLIC_COPILOT_PROVIDER ?? "none"
+  ).toLowerCase()
+
+  // Avoid SSR/CSR markup differences by rendering chat after mount
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
 
 
   const formatCurrency = (amount: number) => {
@@ -23,6 +32,14 @@ export function PromptPanel({ availableCash }: PromptPanelProps) {
   }
 
 
+
+  if (!mounted) {
+    return (
+      <div className="h-full flex items-center justify-center bg-white">
+        Loading…
+      </div>
+    )
+  }
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -45,11 +62,19 @@ export function PromptPanel({ availableCash }: PromptPanelProps) {
           <div className="text-sm font-semibold text-[#030507] font-['Roobert']">{formatCurrency(availableCash)}</div>
         </div>
       </div>
-      <CopilotChat className="h-[78vh] p-2" labels={
-        {
-          initial : `I am a LangGraph AI agent designed to analyze investment opportunities and track stock performance over time. How can I help you with your investment query? For example, you can ask me to analyze a stock like "Invest in Apple with 10k dollars since Jan 2023". \n\nNote: The AI agent has access to stock data from the past 4 years only`
-        }
-      } />
+      {provider === "none" ? (
+        <div className="h-[78vh] p-4 text-sm text-[#575758]">
+          AI chat is disabled (no LLM adapter configured).
+        </div>
+      ) : (
+        <CopilotChat
+          className="h-[78vh] p-2"
+          labels={{
+            initial:
+              `I am a LangGraph AI agent designed to analyze investment opportunities and track stock performance over time. How can I help you with your investment query? For example, you can ask me to analyze a stock like "Invest in Apple with 10k dollars since Jan 2023". \n\nNote: The AI agent has access to stock data from the past 4 years only`,
+          }}
+        />
+      )}
 
     </div >
   )

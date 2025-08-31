@@ -64,6 +64,14 @@ export interface InvestmentPortfolio {
 }
 
 export default function OpenStocksCanvas() {
+  // Read provider at build-time to align with API route behavior
+  const provider = (
+    process.env.NEXT_PUBLIC_COPILOT_PROVIDER ?? "none"
+  ).toLowerCase();
+
+  // Gate dynamic UI until client mount to avoid hydration mismatches
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [currentState, setCurrentState] = useState<PortfolioState>({
     id: "",
     trigger: "",
@@ -281,7 +289,10 @@ export default function OpenStocksCanvas() {
 
   useCopilotChatSuggestions(
     {
-      available: selectedStock ? "disabled" : "enabled",
+      // Disable suggestions entirely when provider is set to 'none',
+      // to avoid hitting the API with an EmptyAdapter (agent-lock only).
+      available:
+        provider === "none" || selectedStock ? "disabled" : "enabled",
       instructions: INVESTMENT_SUGGESTION_PROMPT,
     },
     [selectedStock]
@@ -321,6 +332,15 @@ export default function OpenStocksCanvas() {
       currentPortfolioValue: totalCash,
     };
     setCurrentState(result);
+  }
+
+  // Render a stable, minimal shell on the server
+  if (!mounted) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        Loading…
+      </div>
+    );
   }
 
   return (
