@@ -6,6 +6,7 @@ from typing import Any  # For type hints
 import os  # For environment variables
 import uvicorn  # ASGI server for running the FastAPI app
 import asyncio  # For asynchronous programming
+from fastapi import status
 
 # Import AG UI core components for event-driven communication
 from ag_ui.core import (
@@ -248,6 +249,10 @@ async def langgraph_agent(input_data: RunAgentInput):
 
     # Return the event generator as a streaming response
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.get("/health", include_in_schema=False, status_code=status.HTTP_200_OK)
+def health():
+    return {"status": "ok"}
 
 
 def main():

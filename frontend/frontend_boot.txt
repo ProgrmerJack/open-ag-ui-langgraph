@@ -1,0 +1,14 @@
+
+> frontend@0.1.0 dev C:\Users\Mark\Hyper-Trading-Automation\apps\market-analyst\frontend
+> next dev --turbopack
+
+   ▲ Next.js 15.3.4 (Turbopack)
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.1.15:3000
+
+ ✓ Starting...
+ ✓ Ready in 1688ms
+ ○ Compiling / ...
+ ✓ Compiled / in 6.9s
+ GET / 200 in 304ms
+[?25h
