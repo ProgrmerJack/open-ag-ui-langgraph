@@ -50,6 +50,8 @@ class AgentState(CopilotKitState):
     available_cash: int
     # Summary of current investments
     investment_summary: dict
+    # Portfolio of current investments
+    investment_portfolio: Any
     # Log of tool executions and their results
     tool_logs: list
 
@@ -157,7 +159,7 @@ async def langgraph_agent(input_data: RunAgentInput):
                         ToolCallStartEvent(
                             type=EventType.TOOL_CALL_START,
                             tool_call_id=state["messages"][-1].tool_calls[0].id,
-                            toolCallName=state["messages"][-1]
+                            tool_call_name=state["messages"][-1]
                             .tool_calls[0]
                             .function.name,
                         )
