@@ -1,13 +1,18 @@
-# Import necessary libraries for LangChain, LangGraph, and financial analysis
+﻿# Import necessary libraries for LangChain, LangGraph, and financial analysis
 from langchain_core.runnables import RunnableConfig  # Configuration for LangChain runnables
 from ag_ui.core import StateDeltaEvent, EventType  # AG UI event system for state updates
 from langchain_core.messages import SystemMessage, AIMessage, ToolMessage, HumanMessage  # Message types
-from ag_ui.core.types import AssistantMessage, ToolMessage as ToolMessageAGUI  # AG UI message types
+from ag_ui.core import AssistantMessage, ToolMessage as ToolMessageAGUI  # AG UI message types
 from langchain_core.tools import tool  # Decorator for creating tools
 from langgraph.graph import StateGraph, START, END  # LangGraph workflow components
 from langgraph.types import Command  # For controlling workflow flow
 import yfinance as yf  # Yahoo Finance API for stock data
-from copilotkit import CopilotKitState  # Base state class from CopilotKit
+# Prefer CopilotKit but allow running without it in this environment
+try:
+    from copilotkit import CopilotKitState  # Base state class from CopilotKit
+except Exception:
+    class CopilotKitState(dict):  # minimal shim
+        pass
 from langchain.chat_models import init_chat_model  # Chat model initialization
 from dotenv import load_dotenv  # Environment variable loader
 import json  # JSON handling
@@ -1046,3 +1051,4 @@ async def agent_graph():
     graph = workflow.compile()
     
     return graph
+

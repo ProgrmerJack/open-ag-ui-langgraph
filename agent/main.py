@@ -1,3 +1,18 @@
+# Ensure submodule and local src are importable when running this app directly
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[3]
+_SUBMODULE = _ROOT / "apps" / "agent-backend"
+_SRC = _ROOT / "src"
+# Include submodule and repo root early; append local src to avoid shadowing
+# installed UI protocol packages in the agent venv.
+for _p in (_ROOT, _SUBMODULE):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+if str(_SRC) not in sys.path:
+    sys.path.append(str(_SRC))
+
 # Import necessary libraries and modules
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse  # For streaming server-sent events
@@ -25,7 +40,12 @@ from ag_ui.core import (
 )
 from ag_ui.encoder import EventEncoder  # Encoder for converting events to SSE format
 from stock_analysis import agent_graph  # Import the LangGraph agent
-from copilotkit import CopilotKitState  # Base state class from CopilotKit
+# CopilotKit is preferred, but allow a graceful fallback if it's unavailable in this env
+try:
+    from copilotkit import CopilotKitState  # Base state class from CopilotKit
+except Exception:
+    class CopilotKitState(dict):  # minimal shim for state storage
+        pass
 
 # Initialize FastAPI application instance
 app = FastAPI()
@@ -120,7 +140,10 @@ async def langgraph_agent(input_data: RunAgentInput):
             # Step 6: Start agent execution asynchronously
             agent_task = asyncio.create_task(
                 agent.ainvoke(
-                    state, config={"emit_event": emit_event, "message_id": message_id}
+                    state,
+                    # LangChain/LangGraph expects user-configurable params under the
+                    # "configurable" key to be accessible from node `config`.
+                    config={"configurable": {"emit_event": emit_event, "message_id": message_id}},
                 )
             )
             
@@ -149,19 +172,35 @@ async def langgraph_agent(input_data: RunAgentInput):
                 )
             )
             # Step 9: Handle the final message from the agent
-            if state["messages"][-1].role == "assistant":
+            try:
+                last_msg = state["messages"][-1]
+            except Exception:
+                last_msg = None
+            role = None
+            tool_calls = None
+            content = None
+            if last_msg is not None:
+                role = getattr(last_msg, "role", None)
+                tool_calls = getattr(last_msg, "tool_calls", None)
+                content = getattr(last_msg, "content", None)
+                if role is None and isinstance(last_msg, dict):
+                    role = last_msg.get("role")
+                    tool_calls = last_msg.get("tool_calls")
+                    content = last_msg.get("content")
+            if role == "assistant":
                 # Check if the assistant made tool calls
-                if state["messages"][-1].tool_calls:
+                if tool_calls:
                     # Step 9a: Stream tool call events if tools were used
                     
                     # Signal the start of tool execution
                     yield encoder.encode(
                         ToolCallStartEvent(
                             type=EventType.TOOL_CALL_START,
-                            tool_call_id=state["messages"][-1].tool_calls[0].id,
-                            tool_call_name=state["messages"][-1]
-                            .tool_calls[0]
-                            .function.name,
+                            tool_call_id=(tool_calls[0].id if hasattr(tool_calls[0], 'id') else tool_calls[0].get('id')),
+                            tool_call_name=(
+                                tool_calls[0].function.name if hasattr(tool_calls[0], 'function') and hasattr(tool_calls[0].function, 'name')
+                                else (tool_calls[0].get('function', {}) or {}).get('name')
+                            ),
                         )
                     )
 
@@ -169,10 +208,11 @@ async def langgraph_agent(input_data: RunAgentInput):
                     yield encoder.encode(
                         ToolCallArgsEvent(
                             type=EventType.TOOL_CALL_ARGS,
-                            tool_call_id=state["messages"][-1].tool_calls[0].id,
-                            delta=state["messages"][-1]
-                            .tool_calls[0]
-                            .function.arguments,
+                            tool_call_id=(tool_calls[0].id if hasattr(tool_calls[0], 'id') else tool_calls[0].get('id')),
+                            delta=(
+                                tool_calls[0].function.arguments if hasattr(tool_calls[0], 'function') and hasattr(tool_calls[0].function, 'arguments')
+                                else (tool_calls[0].get('function', {}) or {}).get('arguments')
+                            ),
                         )
                     )
 
@@ -180,7 +220,7 @@ async def langgraph_agent(input_data: RunAgentInput):
                     yield encoder.encode(
                         ToolCallEndEvent(
                             type=EventType.TOOL_CALL_END,
-                            tool_call_id=state["messages"][-1].tool_calls[0].id,
+                            tool_call_id=(tool_calls[0].id if hasattr(tool_calls[0], 'id') else tool_calls[0].get('id')),
                         )
                     )
                 else:
@@ -196,8 +236,8 @@ async def langgraph_agent(input_data: RunAgentInput):
                     )
 
                     # Stream the message content in chunks for better UX
-                    if state["messages"][-1].content:
-                        content = state["messages"][-1].content
+                    if content:
+                        content = content
                         
                         # Split content into 5 parts for gradual streaming
                         n_parts = 5
@@ -256,6 +296,22 @@ async def langgraph_agent(input_data: RunAgentInput):
 def health():
     return {"status": "ok"}
 
+# Mount overlay routers to expose /tools and /verify for integration checks.
+# Import them independently so failure of one doesn't block the other.
+try:
+    from apps.agent_backend_wrapper.tools_router import router as _tools_router  # type: ignore
+    app.include_router(_tools_router)
+except Exception:
+    # Keep the primary app running even if overlay imports fail
+    pass
+
+try:
+    from apps.agent_backend_wrapper.verify_router import router as _verify_router  # type: ignore
+    app.include_router(_verify_router)
+except Exception:
+    # Keep the primary app running even if overlay imports fail
+    pass
+
 
 def main():
     """
@@ -270,9 +326,10 @@ def main():
     port = int(os.getenv("PORT", "8000"))
     
     # Start the uvicorn server with the FastAPI app
+    # Pass the app object directly to avoid import path issues when run as a script
     uvicorn.run(
-        "main:app",        # Reference to the FastAPI app instance
-        host="0.0.0.0",    # Listen on all available interfaces
+        app,               # FastAPI app instance
+        host="0.0.0.0",   # Listen on all available interfaces
         port=port,         # Use the configured port
         reload=True,       # Enable auto-reload for development
     )
