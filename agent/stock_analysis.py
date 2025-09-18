@@ -3,7 +3,6 @@ from langchain_core.runnables import RunnableConfig  # Configuration for LangCha
 from ag_ui.core import StateDeltaEvent, EventType  # AG UI event system for state updates
 from langchain_core.messages import SystemMessage, AIMessage, ToolMessage, HumanMessage  # Message types
 from ag_ui.core import AssistantMessage, ToolMessage as ToolMessageAGUI  # AG UI message types
-from langchain_core.tools import tool  # Decorator for creating tools
 from langgraph.graph import StateGraph, START, END  # LangGraph workflow components
 from langgraph.types import Command  # For controlling workflow flow
 import yfinance as yf  # Yahoo Finance API for stock data
@@ -462,7 +461,7 @@ async def simulation_node(state: AgentState, config: RunnableConfig):
             delta=[
                 {
                     "op": "replace",
-                    "path": f"/investment_portfolio",
+                    "path": "/investment_portfolio",
                     "value": json.loads(state["investment_portfolio"]),
                 }
             ],
@@ -566,7 +565,6 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
     
     # Step 2: Import required libraries for numerical computations
     import numpy as np
-    import pandas as pd
 
     # Step 3: Extract data from state for investment simulation
     stock_data = state["be_stock_data"]  # DataFrame: index=date, columns=tickers
