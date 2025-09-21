@@ -1,17 +1,34 @@
-﻿# Import necessary libraries for LangChain, LangGraph, and financial analysis
-from langchain_core.runnables import RunnableConfig  # Configuration for LangChain runnables
-from ag_ui.core import StateDeltaEvent, EventType  # AG UI event system for state updates
-from langchain_core.messages import SystemMessage, AIMessage, ToolMessage, HumanMessage  # Message types
-from ag_ui.core import AssistantMessage, ToolMessage as ToolMessageAGUI  # AG UI message types
+# \n# Import necessary libraries for LangChain, LangGraph, and financial analysis
+from langchain_core.runnables import (
+    RunnableConfig,
+)  # Configuration for LangChain runnables
+from ag_ui.core import (
+    StateDeltaEvent,
+    EventType,
+)  # AG UI event system for state updates
+from langchain_core.messages import (
+    SystemMessage,
+    AIMessage,
+    ToolMessage,
+    HumanMessage,
+)  # Message types
+from ag_ui.core import (
+    AssistantMessage,
+    ToolMessage as ToolMessageAGUI,
+)  # AG UI message types
 from langgraph.graph import StateGraph, START, END  # LangGraph workflow components
 from langgraph.types import Command  # For controlling workflow flow
 import yfinance as yf  # Yahoo Finance API for stock data
+
 # Prefer CopilotKit but allow running without it in this environment
 try:
     from copilotkit import CopilotKitState  # Base state class from CopilotKit
 except Exception:
+
     class CopilotKitState(dict):  # minimal shim
         pass
+
+
 from langchain.chat_models import init_chat_model  # Chat model initialization
 from dotenv import load_dotenv  # Environment variable loader
 import json  # JSON handling
@@ -32,7 +49,7 @@ class AgentState(CopilotKitState):
     This state flows through all nodes in the LangGraph workflow and contains
     all the data needed for stock analysis, portfolio management, and UI updates.
     """
-    
+
     # List of available tools that the agent can call
     tools: list
     # Conversation history between user and assistant
@@ -54,10 +71,10 @@ class AgentState(CopilotKitState):
 def convert_tool_call(tc):
     """
     Convert LangChain tool call format to AG UI tool call format.
-    
+
     Args:
         tc: Tool call object from LangChain
-        
+
     Returns:
         dict: Tool call formatted for AG UI with id, type, and function details
     """
@@ -74,10 +91,10 @@ def convert_tool_call(tc):
 def convert_tool_call_for_model(tc):
     """
     Convert AG UI tool call format back to LangChain model format.
-    
+
     Args:
         tc: Tool call object from AG UI
-        
+
     Returns:
         dict: Tool call formatted for LangChain models with parsed arguments
     """
@@ -87,6 +104,7 @@ def convert_tool_call_for_model(tc):
         "args": json.loads(tc.function.arguments),
     }
 
+
 # Tool definition for extracting investment parameters from user input
 # This tool is used by the LLM to parse natural language requests into structured data
 extract_relevant_data_from_user_prompt = {
@@ -95,7 +113,7 @@ extract_relevant_data_from_user_prompt = {
     "parameters": {
         "type": "object",
         "properties": {
-            # Array of stock ticker symbols (e.g., ['AAPL', 'GOOGL', 'MSFT'])
+            # Array of stock ticker symbols (e.g., ['AAPL', 'GOOGL'])
             "ticker_symbols": {
                 "type": "array",
                 "items": {
@@ -121,7 +139,10 @@ extract_relevant_data_from_user_prompt = {
             # Investment strategy: single purchase vs dollar-cost averaging
             "interval_of_investment": {
                 "type": "string",
-                "description": "The interval of investment, e.g. '1d', '5d', '1mo', '3mo', '6mo', '1y'1d', '5d', '7d', '1mo', '3mo', '6mo', '1y', '2y', '3y', '4y', '5y'. If the user did not specify the interval, then assume it as 'single_shot'",
+                "description": (
+                    "The interval of investment, e.g. '1d', '5d', '1mo', '3mo', '6mo', '1y'1d', '5d', '7d', '1mo', '3mo', '6mo', '1y', '2y', '3y', '4y', '5y'. "
+                    "If the user did not specify the interval, then assume it as 'single_shot'"
+                ),
             },
             # Whether to add to real portfolio or simulate in sandbox
             "to_be_added_in_portfolio": {
@@ -202,7 +223,7 @@ generate_insights = {
 async def chat_node(state: AgentState, config: RunnableConfig):
     """
     First node in the workflow: Analyzes user input and extracts investment parameters.
-    
+
     This function:
     1. Creates a tool log entry for UI feedback
     2. Initializes the chat model (Gemini 2.5 Pro)
@@ -210,7 +231,7 @@ async def chat_node(state: AgentState, config: RunnableConfig):
     4. Uses the LLM to extract structured data from user input
     5. Handles retries if the model doesn't respond properly
     6. Updates the conversation state with the response
-    
+
     Args:
         state: Current agent state containing messages and context
         config: Runtime configuration including event emitters
@@ -219,7 +240,11 @@ async def chat_node(state: AgentState, config: RunnableConfig):
         # Step 1: Create and emit a tool log entry for UI feedback
         tool_log_id = str(uuid.uuid4())
         state["tool_logs"].append(
-            {"id": tool_log_id, "message": "Analyzing user query", "status": "processing"}
+            {
+                "id": tool_log_id,
+                "message": "Analyzing user query",
+                "status": "processing",
+            }
         )
         config.get("configurable").get("emit_event")(
             StateDeltaEvent(
@@ -231,17 +256,17 @@ async def chat_node(state: AgentState, config: RunnableConfig):
                         "value": {
                             "message": "Analyzing user query",
                             "status": "processing",
-                            "id": tool_log_id
+                            "id": tool_log_id,
                         },
                     }
                 ],
             )
         )
         await asyncio.sleep(0)  # Yield control to allow UI updates
-        
+
         # Step 2: Initialize the chat model (Gemini 2.5 Pro from Google)
         model = init_chat_model("gemini-2.5-pro", model_provider="google_genai")
-        
+
         # Step 3: Convert state messages to LangChain message format
         messages = []
         for message in state["messages"]:
@@ -290,12 +315,12 @@ async def chat_node(state: AgentState, config: RunnableConfig):
             if retry_counter > 3:
                 print("retry_counter", retry_counter)
                 break
-                
+
             # Call the model with the data extraction tool
             response = await model.bind_tools(
                 [extract_relevant_data_from_user_prompt]
             ).ainvoke(messages, config=config)
-            
+
             # Step 5a: Handle successful tool call response
             if response.tool_calls:
                 # Convert tool calls to AG UI format
@@ -304,7 +329,7 @@ async def chat_node(state: AgentState, config: RunnableConfig):
                     role="assistant", tool_calls=tool_calls, id=response.id
                 )
                 state["messages"].append(a_message)
-                
+
                 # Update tool log status to completed
                 index = len(state["tool_logs"]) - 1
                 config.get("configurable").get("emit_event")(
@@ -314,25 +339,25 @@ async def chat_node(state: AgentState, config: RunnableConfig):
                             {
                                 "op": "replace",
                                 "path": f"/tool_logs/{index}/status",
-                                "value": "completed"
+                                "value": "completed",
                             }
                         ],
                     )
                 )
                 await asyncio.sleep(0)
                 return  # Success - exit the function
-                
+
             # Step 5b: Handle empty response (retry needed)
             elif response.content == "" and response.tool_calls == []:
                 retry_counter += 1
-                
+
             # Step 5c: Handle text response (no tool call)
             else:
                 a_message = AssistantMessage(
                     id=response.id, content=response.content, role="assistant"
                 )
                 state["messages"].append(a_message)
-                
+
                 # Update tool log status to completed
                 index = len(state["tool_logs"]) - 1
                 config.get("configurable").get("emit_event")(
@@ -342,21 +367,21 @@ async def chat_node(state: AgentState, config: RunnableConfig):
                             {
                                 "op": "replace",
                                 "path": f"/tool_logs/{index}/status",
-                                "value": "completed"
+                                "value": "completed",
                             }
                         ],
                     )
                 )
                 await asyncio.sleep(0)
                 return  # Success - exit the function
-                
+
         # Step 6: Handle case where all retries failed
         print("hello")
         a_message = AssistantMessage(
             id=response.id, content=response.content, role="assistant"
         )
         state["messages"].append(a_message)
-        
+
     except Exception as e:
         # Step 7: Handle any exceptions that occur during processing
         print(e)
@@ -365,7 +390,7 @@ async def chat_node(state: AgentState, config: RunnableConfig):
         return Command(
             goto="end",  # Skip to end node on error
         )
-        
+
     # Step 8: Final cleanup - mark tool log as completed
     index = len(state["tool_logs"]) - 1
     config.get("configurable").get("emit_event")(
@@ -375,7 +400,7 @@ async def chat_node(state: AgentState, config: RunnableConfig):
                 {
                     "op": "replace",
                     "path": f"/tool_logs/{index}/status",
-                    "value": "completed"
+                    "value": "completed",
                 }
             ],
         )
@@ -387,7 +412,7 @@ async def chat_node(state: AgentState, config: RunnableConfig):
 async def end_node(state: AgentState, config: RunnableConfig):
     """
     Terminal node in the workflow: Marks the completion of the agent execution.
-    
+
     This is a simple placeholder node that signifies the end of the workflow.
     No processing is done here - it's just a marker for workflow completion.
     """
@@ -397,7 +422,7 @@ async def end_node(state: AgentState, config: RunnableConfig):
 async def simulation_node(state: AgentState, config: RunnableConfig):
     """
     Second node in the workflow: Fetches historical stock data for analysis.
-    
+
     This function:
     1. Creates a tool log entry for UI feedback
     2. Extracts investment parameters from the previous tool call
@@ -405,20 +430,20 @@ async def simulation_node(state: AgentState, config: RunnableConfig):
     4. Validates and adjusts the investment date if too far in the past
     5. Downloads historical stock data from Yahoo Finance
     6. Stores the data for use in subsequent nodes
-    
+
     Args:
         state: Current agent state with extracted investment parameters
         config: Runtime configuration including event emitters
-        
+
     Returns:
         Command: Directs workflow to the cash_allocation node
     """
     print("inside simulation node")
-    
+
     # Step 1: Create and emit tool log entry for UI feedback
     tool_log_id = str(uuid.uuid4())
     state["tool_logs"].append(
-            {"id": tool_log_id, "message": "Gathering stock data", "status": "processing"}
+        {"id": tool_log_id, "message": "Gathering stock data", "status": "processing"}
     )
     config.get("configurable").get("emit_event")(
         StateDeltaEvent(
@@ -430,18 +455,18 @@ async def simulation_node(state: AgentState, config: RunnableConfig):
                     "value": {
                         "message": "Gathering stock data",
                         "status": "processing",
-                        "id": tool_log_id
+                        "id": tool_log_id,
                     },
                 }
             ],
         )
     )
     await asyncio.sleep(0)
-    
+
     # Step 2: Extract investment parameters from the last assistant message
     arguments = json.loads(state["messages"][-1].tool_calls[0].function.arguments)
     print("arguments", arguments)
-    
+
     # Step 3: Update the investment portfolio in the state
     # Create portfolio entries with ticker symbols and investment amounts
     state["investment_portfolio"] = json.dumps(
@@ -453,7 +478,7 @@ async def simulation_node(state: AgentState, config: RunnableConfig):
             for index, ticker in enumerate(arguments["ticker_symbols"])
         ]
     )
-    
+
     # Step 4: Emit state change event to update the UI
     config.get("configurable").get("emit_event")(
         StateDeltaEvent(
@@ -468,38 +493,38 @@ async def simulation_node(state: AgentState, config: RunnableConfig):
         )
     )
     await asyncio.sleep(2)  # Brief delay for UI updates
-    
+
     # Step 5: Prepare parameters for historical data download
     tickers = arguments["ticker_symbols"]
     investment_date = arguments["investment_date"]
     current_year = datetime.now().year
-    
+
     # Step 6: Validate and adjust investment date if necessary
     # Limit historical data to maximum of 4 years to avoid API limitations
-    if( current_year - int(investment_date[:4]) > 4  ):
+    if current_year - int(investment_date[:4]) > 4:
         print("investment date is more than 4 years ago")
         investment_date = f"{current_year - 4}-01-01"
-    
+
     # Step 7: Determine the appropriate time period for data download
     if current_year - int(investment_date[:4]) == 0:
         history_period = "1y"  # Current year - get 1 year of data
     else:
         history_period = f"{current_year - int(investment_date[:4])}y"
-    
+
     # Step 8: Download historical stock data from Yahoo Finance
     data = yf.download(
-        tickers,                                    # List of ticker symbols
-        period=history_period,                      # Time period for historical data
-        interval="3mo",                            # Data interval (quarterly)
-        start=investment_date,                     # Start date
-        end=datetime.today().strftime("%Y-%m-%d"), # End date (today)
+        tickers,  # List of ticker symbols
+        period=history_period,  # Time period for historical data
+        interval="3mo",  # Data interval (quarterly)
+        start=investment_date,  # Start date
+        end=datetime.today().strftime("%Y-%m-%d"),  # End date (today)
     )
-    
+
     # Step 9: Store the closing prices and arguments in state for next nodes
     state["be_stock_data"] = data["Close"]  # Extract closing prices only
-    state["be_arguments"] = arguments       # Store parsed arguments
+    state["be_arguments"] = arguments  # Store parsed arguments
     print(state["be_stock_data"])
-    
+
     # Step 10: Update tool log status to completed
     index = len(state["tool_logs"]) - 1
     config.get("configurable").get("emit_event")(
@@ -509,13 +534,13 @@ async def simulation_node(state: AgentState, config: RunnableConfig):
                 {
                     "op": "replace",
                     "path": f"/tool_logs/{index}/status",
-                    "value": "completed"
+                    "value": "completed",
                 }
             ],
         )
     )
     await asyncio.sleep(0)
-    
+
     # Step 11: Direct workflow to the cash allocation node
     return Command(goto="cash_allocation", update=state)
 
@@ -523,23 +548,23 @@ async def simulation_node(state: AgentState, config: RunnableConfig):
 async def cash_allocation_node(state: AgentState, config: RunnableConfig):
     """
     Third node in the workflow: Performs investment simulation and cash allocation.
-    
+
     This is the most complex node that handles:
     1. Investment simulation (single-shot vs dollar-cost averaging)
     2. Cash allocation and share purchasing logic
     3. Portfolio performance calculation vs SPY benchmark
     4. Investment logging and error handling
     5. UI data preparation for charts and tables
-    
+
     Args:
         state: Current agent state with stock data and investment parameters
         config: Runtime configuration including event emitters
-        
+
     Returns:
         Command: Directs workflow to the insights node
     """
     print("inside cash allocation node")
-    
+
     # Step 1: Create and emit tool log entry for UI feedback
     tool_log_id = str(uuid.uuid4())
     state["tool_logs"].append(
@@ -555,14 +580,14 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
                     "value": {
                         "message": "Allocating cash",
                         "status": "processing",
-                        "id": tool_log_id
+                        "id": tool_log_id,
                     },
                 }
             ],
         )
     )
     await asyncio.sleep(2)
-    
+
     # Step 2: Import required libraries for numerical computations
     import numpy as np
 
@@ -570,7 +595,6 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
     stock_data = state["be_stock_data"]  # DataFrame: index=date, columns=tickers
     args = state["be_arguments"]
     tickers = args["ticker_symbols"]
-    investment_date = args["investment_date"]
     amounts = args["amount_of_dollars_to_be_invested"]  # list, one per ticker
     interval = args.get("interval_of_investment", "single_shot")
 
@@ -580,7 +604,7 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
         total_cash = state["available_cash"]
     else:
         total_cash = sum(amounts)  # Fallback to sum of investment amounts
-        
+
     # Initialize holdings dictionary to track shares owned
     holdings = {ticker: 0.0 for ticker in tickers}
     investment_log = []  # Log of all investment transactions
@@ -595,11 +619,11 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
         # Single-shot investment: Buy all shares at the first available date
         first_date = stock_data.index[0]
         row = stock_data.loc[first_date]
-        
+
         # Process each ticker for single-shot investment
         for idx, ticker in enumerate(tickers):
             price = row[ticker]
-            
+
             # Skip if no price data available
             if np.isnan(price):
                 investment_log.append(
@@ -610,13 +634,15 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
                     (str(first_date.date()), ticker, price, amounts[idx])
                 )
                 continue
-                
+
             # Get allocated amount for this specific ticker
             allocated = amounts[idx]
-            
+
             # Check if we have enough cash and the allocation covers at least one share
             if total_cash >= allocated and allocated >= price:
-                shares_to_buy = allocated // price  # Calculate shares (no fractional shares)
+                shares_to_buy = (
+                    allocated // price
+                )  # Calculate shares (no fractional shares)
                 if shares_to_buy > 0:
                     cost = shares_to_buy * price
                     holdings[ticker] += shares_to_buy
@@ -648,7 +674,7 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
                 price = row[ticker]
                 if np.isnan(price):
                     continue  # skip if price is NaN
-                    
+
                 # Invest as much as possible for this ticker at this date
                 if total_cash >= price:
                     shares_to_buy = total_cash // price
@@ -676,7 +702,7 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
     percent_allocation_per_stock = {}
     percent_return_per_stock = {}
     total_invested = 0.0
-    
+
     # Calculate how much was actually invested in each stock
     for idx, ticker in enumerate(tickers):
         if interval == "single_shot":
@@ -698,39 +724,39 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
                         pass
         total_invested_per_stock[ticker] = invested
         total_invested += invested
-        
+
     # Step 8: Calculate percentage allocations and returns for each stock
     for ticker in tickers:
         invested = total_invested_per_stock[ticker]
         holding_value = holdings[ticker] * final_prices[ticker]
         returns[ticker] = holding_value - invested  # Absolute return in dollars
         total_value += holding_value
-        
+
         # Calculate percentage allocation (how much of total was invested in this stock)
         percent_allocation_per_stock[ticker] = (
             (invested / total_invested * 100) if total_invested > 0 else 0.0
         )
-        
+
         # Calculate percentage return for this stock
         percent_return_per_stock[ticker] = (
             ((holding_value - invested) / invested * 100) if invested > 0 else 0.0
         )
-        
+
     total_value += total_cash  # Add remaining cash to total portfolio value
 
     # Step 9: Store investment results in state for UI display
     state["investment_summary"] = {
-        "holdings": holdings,                           # Shares owned per ticker
-        "final_prices": final_prices.to_dict(),       # Current stock prices
-        "cash": total_cash,                            # Remaining cash
-        "returns": returns,                            # Dollar returns per stock
-        "total_value": total_value,                    # Total portfolio value
-        "investment_log": investment_log,              # Transaction history
-        "add_funds_needed": add_funds_needed,          # Whether more funds needed
-        "add_funds_dates": add_funds_dates,            # Dates funds were insufficient
-        "total_invested_per_stock": total_invested_per_stock,    # Amount invested per stock
+        "holdings": holdings,  # Shares owned per ticker
+        "final_prices": final_prices.to_dict(),  # Current stock prices
+        "cash": total_cash,  # Remaining cash
+        "returns": returns,  # Dollar returns per stock
+        "total_value": total_value,  # Total portfolio value
+        "investment_log": investment_log,  # Transaction history
+        "add_funds_needed": add_funds_needed,  # Whether more funds needed
+        "add_funds_dates": add_funds_dates,  # Dates funds were insufficient
+        "total_invested_per_stock": total_invested_per_stock,  # Amount invested per stock
         "percent_allocation_per_stock": percent_allocation_per_stock,  # Allocation percentages
-        "percent_return_per_stock": percent_return_per_stock,    # Return percentages
+        "percent_return_per_stock": percent_return_per_stock,  # Return percentages
     }
     state["available_cash"] = total_cash  # Update available cash in state
 
@@ -757,7 +783,7 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
     spy_cash = total_invested  # Use same total investment amount
     spy_invested = 0.0
     spy_investment_log = []
-    
+
     if interval == "single_shot":
         # Single-shot SPY investment at first date
         first_date = stock_data.index[0]
@@ -792,8 +818,8 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
     # Create time series data comparing portfolio vs SPY performance
     performanceData = []
     running_holdings = holdings.copy()  # Snapshot of final holdings
-    running_cash = total_cash           # Remaining cash
-    
+    running_cash = total_cash  # Remaining cash
+
     for date in stock_data.index:
         # Calculate portfolio value at this historical date
         port_value = (
@@ -804,13 +830,13 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
             )
             + running_cash
         )
-        
+
         # Calculate SPY value at this historical date
         spy_price = spy_prices.loc[date]
         if isinstance(spy_price, pd.Series):
             spy_price = spy_price.iloc[0]
         spy_val = spy_shares * spy_price + spy_cash if not pd.isna(spy_price) else None
-        
+
         # Add data point for this date
         performanceData.append(
             {
@@ -832,7 +858,7 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
             )
     else:
         msg = "All investments were made successfully.\n"
-        
+
     msg += f"\nFinal portfolio value: ${total_value:.2f}\n"
     msg += "Returns by ticker (percent and $):\n"
     for ticker in tickers:
@@ -869,7 +895,7 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
             id=str(uuid.uuid4()),
         )
     )
-    
+
     # Step 17: Update tool log status to completed
     index = len(state["tool_logs"]) - 1
     config.get("configurable").get("emit_event")(
@@ -879,40 +905,45 @@ async def cash_allocation_node(state: AgentState, config: RunnableConfig):
                 {
                     "op": "replace",
                     "path": f"/tool_logs/{index}/status",
-                    "value": "completed"
+                    "value": "completed",
                 }
             ],
         )
     )
     await asyncio.sleep(0)
-    
+
     # Step 18: Direct workflow to the insights generation node
     return Command(goto="ui_decision", update=state)
+
 
 async def insights_node(state: AgentState, config: RunnableConfig):
     """
     Fourth node in the workflow: Generates investment insights using AI.
-    
+
     This function:
     1. Creates a tool log entry for UI feedback
     2. Extracts ticker symbols from the investment arguments
     3. Uses Gemini model to generate bull and bear insights
     4. Integrates insights into the existing tool call arguments
     5. Updates the conversation state with the enhanced data
-    
+
     Args:
         state: Current agent state with investment data and analysis
         config: Runtime configuration including event emitters
-        
+
     Returns:
         Command: Directs workflow to the end node
     """
     print("inside insights node")
-    
+
     # Step 1: Create and emit tool log entry for UI feedback
     tool_log_id = str(uuid.uuid4())
     state["tool_logs"].append(
-        {"id": tool_log_id, "message": "Extracting key insights", "status": "processing"}
+        {
+            "id": tool_log_id,
+            "message": "Extracting key insights",
+            "status": "processing",
+        }
     )
     config.get("configurable").get("emit_event")(
         StateDeltaEvent(
@@ -924,18 +955,18 @@ async def insights_node(state: AgentState, config: RunnableConfig):
                     "value": {
                         "message": "Extracting key insights",
                         "status": "processing",
-                        "id": tool_log_id
+                        "id": tool_log_id,
                     },
                 }
             ],
         )
     )
     await asyncio.sleep(0)
-    
+
     # Step 2: Extract ticker symbols from investment arguments
     args = state.get("be_arguments") or state.get("arguments")
     tickers = args.get("ticker_symbols", [])
-    
+
     # Step 3: Initialize AI model and generate insights
     model = init_chat_model("gemini-2.5-pro", model_provider="google_genai")
     response = await model.bind_tools(generate_insights).ainvoke(
@@ -945,7 +976,7 @@ async def insights_node(state: AgentState, config: RunnableConfig):
         ],
         config=config,
     )
-    
+
     # Step 4: Process the insights response
     if response.tool_calls:
         # Step 4a: Extract current arguments from the last tool call
@@ -959,7 +990,7 @@ async def insights_node(state: AgentState, config: RunnableConfig):
     else:
         # Step 4d: Handle case where no insights were generated
         state["insights"] = {}
-        
+
     # Step 5: Update tool log status to completed
     index = len(state["tool_logs"]) - 1
     config.get("configurable").get("emit_event")(
@@ -969,13 +1000,13 @@ async def insights_node(state: AgentState, config: RunnableConfig):
                 {
                     "op": "replace",
                     "path": f"/tool_logs/{index}/status",
-                    "value": "completed"
+                    "value": "completed",
                 }
             ],
         )
     )
     await asyncio.sleep(0)
-    
+
     # Step 6: Direct workflow to the end node (completion)
     return Command(goto="end", update=state)
 
@@ -983,14 +1014,14 @@ async def insights_node(state: AgentState, config: RunnableConfig):
 def router_function1(state: AgentState, config: RunnableConfig):
     """
     Router function that determines the next node in the workflow.
-    
+
     This function examines the last message in the conversation to decide
     whether to proceed to the simulation node or end the workflow.
-    
+
     Args:
         state: Current agent state with conversation messages
         config: Runtime configuration (unused in this router)
-        
+
     Returns:
         str: Next node name ("end" or "simulation")
     """
@@ -1009,44 +1040,51 @@ def router_function1(state: AgentState, config: RunnableConfig):
 async def agent_graph():
     """
     Creates and configures the LangGraph workflow for stock analysis.
-    
+
     This function:
     1. Creates a StateGraph with the AgentState structure
     2. Adds all workflow nodes (chat, simulation, cash_allocation, insights, end)
     3. Defines the workflow edges and conditional routing
     4. Sets entry and exit points
     5. Compiles the graph for execution
-    
+
     Returns:
         CompiledStateGraph: The compiled workflow ready for execution
     """
     # Step 1: Create the workflow graph with AgentState structure
     workflow = StateGraph(AgentState)
-    
+
     # Step 2: Add all nodes to the workflow
-    workflow.add_node("chat", chat_node)                    # Initial chat and parameter extraction
-    workflow.add_node("simulation", simulation_node)        # Stock data gathering
-    workflow.add_node("cash_allocation", cash_allocation_node)  # Investment simulation and analysis
-    workflow.add_node("insights", insights_node)            # AI-generated insights
-    workflow.add_node("end", end_node)                      # Terminal node
-    
+    workflow.add_node("chat", chat_node)  # Initial chat and parameter extraction
+    workflow.add_node("simulation", simulation_node)  # Stock data gathering
+    workflow.add_node(
+        "cash_allocation", cash_allocation_node
+    )  # Investment simulation and analysis
+    workflow.add_node("insights", insights_node)  # AI-generated insights
+    workflow.add_node("end", end_node)  # Terminal node
+
     # Step 3: Set workflow entry and exit points
-    workflow.set_entry_point("chat")      # Always start with chat node
-    workflow.set_finish_point("end")      # Always end with end node
+    workflow.set_entry_point("chat")  # Always start with chat node
+    workflow.set_finish_point("end")  # Always end with end node
 
     # Step 4: Define workflow edges and routing logic
-    workflow.add_edge(START, "chat")                        # Entry: START -> chat
-    workflow.add_conditional_edges("chat", router_function1) # Conditional: chat -> (simulation|end)
-    workflow.add_edge("simulation", "cash_allocation")      # Direct: simulation -> cash_allocation
-    workflow.add_edge("cash_allocation", "insights")        # Direct: cash_allocation -> insights
-    workflow.add_edge("insights", "end")                    # Direct: insights -> end
-    workflow.add_edge("end", END)                          # Exit: end -> END
-    
+    workflow.add_edge(START, "chat")  # Entry: START -> chat
+    workflow.add_conditional_edges(
+        "chat", router_function1
+    )  # Conditional: chat -> (simulation|end)
+    workflow.add_edge(
+        "simulation", "cash_allocation"
+    )  # Direct: simulation -> cash_allocation
+    workflow.add_edge(
+        "cash_allocation", "insights"
+    )  # Direct: cash_allocation -> insights
+    workflow.add_edge("insights", "end")  # Direct: insights -> end
+    workflow.add_edge("end", END)  # Exit: end -> END
+
     # Step 5: Compile the workflow graph
     # Note: Memory persistence is commented out for simplicity
     # from langgraph.checkpoint.memory import MemorySaver
     # graph = workflow.compile(MemorySaver())
     graph = workflow.compile()
-    
-    return graph
 
+    return graph

@@ -1,7 +1,33 @@
-# Ensure submodule and local src are importable when running this app directly
-import sys
-from pathlib import Path
+from __future__ import annotations
 
+import asyncio  # For asynchronous programming
+import os  # For environment variables
+import sys
+import uuid  # For generating unique message IDs
+from pathlib import Path
+from typing import Any  # For type hints
+
+import uvicorn  # ASGI server for running the FastAPI app
+from fastapi import FastAPI, status
+from fastapi.responses import StreamingResponse  # For streaming server-sent events
+from ag_ui.core import (
+    RunAgentInput,  # Input data structure for agent runs
+    StateSnapshotEvent,  # Event for capturing state snapshots
+    EventType,  # Enumeration of all event types
+    RunStartedEvent,  # Event to signal run start
+    RunFinishedEvent,  # Event to signal run completion
+    TextMessageStartEvent,  # Event to start text message streaming
+    TextMessageEndEvent,  # Event to end text message streaming
+    TextMessageContentEvent,  # Event for text message content chunks
+    ToolCallStartEvent,  # Event to start tool call
+    ToolCallEndEvent,  # Event to end tool call
+    ToolCallArgsEvent,  # Event for tool call arguments
+    StateDeltaEvent,  # Event for state changes
+)
+from ag_ui.encoder import EventEncoder  # Encoder for converting events to SSE format
+from stock_analysis import agent_graph  # Import the LangGraph agent
+
+# Ensure submodule and local src are importable when running this app directly
 _ROOT = Path(__file__).resolve().parents[3]
 _SUBMODULE = _ROOT / "apps" / "agent-backend"
 _SRC = _ROOT / "src"
@@ -13,39 +39,14 @@ for _p in (_ROOT, _SUBMODULE):
 if str(_SRC) not in sys.path:
     sys.path.append(str(_SRC))
 
-# Import necessary libraries and modules
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse  # For streaming server-sent events
-import uuid  # For generating unique message IDs
-from typing import Any  # For type hints
-import os  # For environment variables
-import uvicorn  # ASGI server for running the FastAPI app
-import asyncio  # For asynchronous programming
-from fastapi import status
-
-# Import AG UI core components for event-driven communication
-from ag_ui.core import (
-    RunAgentInput,        # Input data structure for agent runs
-    StateSnapshotEvent,   # Event for capturing state snapshots
-    EventType,            # Enumeration of all event types
-    RunStartedEvent,      # Event to signal run start
-    RunFinishedEvent,     # Event to signal run completion
-    TextMessageStartEvent,    # Event to start text message streaming
-    TextMessageEndEvent,      # Event to end text message streaming
-    TextMessageContentEvent,  # Event for text message content chunks
-    ToolCallStartEvent,       # Event to start tool call
-    ToolCallEndEvent,         # Event to end tool call
-    ToolCallArgsEvent,        # Event for tool call arguments
-    StateDeltaEvent           # Event for state changes
-)
-from ag_ui.encoder import EventEncoder  # Encoder for converting events to SSE format
-from stock_analysis import agent_graph  # Import the LangGraph agent
 # CopilotKit is preferred, but allow a graceful fallback if it's unavailable in this env
 try:
     from copilotkit import CopilotKitState  # Base state class from CopilotKit
 except Exception:
+
     class CopilotKitState(dict):  # minimal shim for state storage
         pass
+
 
 # Initialize FastAPI application instance
 app = FastAPI()
@@ -57,7 +58,7 @@ class AgentState(CopilotKitState):
     It extends CopilotKitState and contains all the information needed
     for stock analysis and investment operations.
     """
-    
+
     # List of available tools for the agent to use
     tools: list
     # Conversation history between user and assistant
@@ -75,15 +76,16 @@ class AgentState(CopilotKitState):
     # Log of tool executions and their results
     tool_logs: list
 
+
 # FastAPI endpoint that handles agent execution requests
 @app.post("/langgraph-agent")
 async def langgraph_agent(input_data: RunAgentInput):
     """
     Main endpoint that processes agent requests and streams back events.
-    
+
     Args:
         input_data (RunAgentInput): Contains thread_id, run_id, messages, tools, and state
-        
+
     Returns:
         StreamingResponse: Server-sent events stream with agent execution updates
     """
@@ -113,27 +115,29 @@ async def langgraph_agent(input_data: RunAgentInput):
             # Step 3: Send initial state snapshot to frontend
             yield encoder.encode(
                 StateSnapshotEvent(
-                    type=EventType.STATE_SNAPSHOT, 
+                    type=EventType.STATE_SNAPSHOT,
                     snapshot={
                         "available_cash": input_data.state["available_cash"],
                         "investment_summary": input_data.state["investment_summary"],
-                        "investment_portfolio": input_data.state["investment_portfolio"],
-                        "tool_logs": []
-                    }
+                        "investment_portfolio": input_data.state[
+                            "investment_portfolio"
+                        ],
+                        "tool_logs": [],
+                    },
                 )
             )
-            
+
             # Step 4: Initialize agent state with input data
             state = AgentState(
                 tools=input_data.tools,
                 messages=input_data.messages,
                 be_stock_data=None,  # Will be populated by agent tools
-                be_arguments=None,   # Will be populated by agent tools
+                be_arguments=None,  # Will be populated by agent tools
                 available_cash=input_data.state["available_cash"],
                 investment_portfolio=input_data.state["investment_portfolio"],
-                tool_logs=[]
+                tool_logs=[],
             )
-            
+
             # Step 5: Create and configure the LangGraph agent
             agent = await agent_graph()
 
@@ -143,10 +147,15 @@ async def langgraph_agent(input_data: RunAgentInput):
                     state,
                     # LangChain/LangGraph expects user-configurable params under the
                     # "configurable" key to be accessible from node `config`.
-                    config={"configurable": {"emit_event": emit_event, "message_id": message_id}},
+                    config={
+                        "configurable": {
+                            "emit_event": emit_event,
+                            "message_id": message_id,
+                        }
+                    },
                 )
             )
-            
+
             # Step 7: Stream events from agent execution as they occur
             while True:
                 try:
@@ -162,13 +171,7 @@ async def langgraph_agent(input_data: RunAgentInput):
             yield encoder.encode(
                 StateDeltaEvent(
                     type=EventType.STATE_DELTA,
-                    delta=[
-                        {
-                            "op": "replace",
-                            "path": "/tool_logs",
-                            "value": []
-                        }
-                    ]
+                                        delta=[{"op": "replace", "path": "/tool_logs", "value": []}],
                 )
             )
             # Step 9: Handle the final message from the agent
@@ -191,15 +194,23 @@ async def langgraph_agent(input_data: RunAgentInput):
                 # Check if the assistant made tool calls
                 if tool_calls:
                     # Step 9a: Stream tool call events if tools were used
-                    
+
                     # Signal the start of tool execution
                     yield encoder.encode(
                         ToolCallStartEvent(
                             type=EventType.TOOL_CALL_START,
-                            tool_call_id=(tool_calls[0].id if hasattr(tool_calls[0], 'id') else tool_calls[0].get('id')),
+                            tool_call_id=(
+                                tool_calls[0].id
+                                if hasattr(tool_calls[0], "id")
+                                else tool_calls[0].get("id")
+                            ),
                             tool_call_name=(
-                                tool_calls[0].function.name if hasattr(tool_calls[0], 'function') and hasattr(tool_calls[0].function, 'name')
-                                else (tool_calls[0].get('function', {}) or {}).get('name')
+                                tool_calls[0].function.name
+                                if hasattr(tool_calls[0], "function")
+                                and hasattr(tool_calls[0].function, "name")
+                                else (tool_calls[0].get("function", {}) or {}).get(
+                                    "name"
+                                )
                             ),
                         )
                     )
@@ -208,10 +219,18 @@ async def langgraph_agent(input_data: RunAgentInput):
                     yield encoder.encode(
                         ToolCallArgsEvent(
                             type=EventType.TOOL_CALL_ARGS,
-                            tool_call_id=(tool_calls[0].id if hasattr(tool_calls[0], 'id') else tool_calls[0].get('id')),
+                            tool_call_id=(
+                                tool_calls[0].id
+                                if hasattr(tool_calls[0], "id")
+                                else tool_calls[0].get("id")
+                            ),
                             delta=(
-                                tool_calls[0].function.arguments if hasattr(tool_calls[0], 'function') and hasattr(tool_calls[0].function, 'arguments')
-                                else (tool_calls[0].get('function', {}) or {}).get('arguments')
+                                tool_calls[0].function.arguments
+                                if hasattr(tool_calls[0], "function")
+                                and hasattr(tool_calls[0].function, "arguments")
+                                else (tool_calls[0].get("function", {}) or {}).get(
+                                    "arguments"
+                                )
                             ),
                         )
                     )
@@ -220,12 +239,16 @@ async def langgraph_agent(input_data: RunAgentInput):
                     yield encoder.encode(
                         ToolCallEndEvent(
                             type=EventType.TOOL_CALL_END,
-                            tool_call_id=(tool_calls[0].id if hasattr(tool_calls[0], 'id') else tool_calls[0].get('id')),
+                            tool_call_id=(
+                                tool_calls[0].id
+                                if hasattr(tool_calls[0], "id")
+                                else tool_calls[0].get("id")
+                            ),
                         )
                     )
                 else:
                     # Step 9b: Stream text message if no tools were used
-                    
+
                     # Signal the start of text message
                     yield encoder.encode(
                         TextMessageStartEvent(
@@ -238,16 +261,21 @@ async def langgraph_agent(input_data: RunAgentInput):
                     # Stream the message content in chunks for better UX
                     if content:
                         content = content
-                        
+
                         # Split content into 5 parts for gradual streaming
                         n_parts = 5
                         part_length = max(1, len(content) // n_parts)
-                        parts = [content[i:i+part_length] for i in range(0, len(content), part_length)]
-                        
+                        parts = [
+                            content[i : i + part_length]
+                            for i in range(0, len(content), part_length)
+                        ]
+
                         # Handle rounding by merging extra parts into the last one
                         if len(parts) > n_parts:
-                            parts = parts[:n_parts-1] + [''.join(parts[n_parts-1:])]
-                        
+                            parts = parts[: n_parts - 1] + [
+                                "".join(parts[n_parts - 1 :])
+                            ]
+
                         # Stream each part with a delay for typing effect
                         for part in parts:
                             yield encoder.encode(
@@ -267,7 +295,7 @@ async def langgraph_agent(input_data: RunAgentInput):
                                 delta="Something went wrong! Please try again.",
                             )
                         )
-                    
+
                     # Signal the end of text message
                     yield encoder.encode(
                         TextMessageEndEvent(
@@ -292,14 +320,17 @@ async def langgraph_agent(input_data: RunAgentInput):
     # Return the event generator as a streaming response
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+
 @app.get("/health", include_in_schema=False, status_code=status.HTTP_200_OK)
 def health():
     return {"status": "ok"}
+
 
 # Mount overlay routers to expose /tools and /verify for integration checks.
 # Import them independently so failure of one doesn't block the other.
 try:
     from apps.agent_backend_wrapper.tools_router import router as _tools_router  # type: ignore
+
     app.include_router(_tools_router)
 except Exception:
     # Keep the primary app running even if overlay imports fail
@@ -307,6 +338,7 @@ except Exception:
 
 try:
     from apps.agent_backend_wrapper.verify_router import router as _verify_router  # type: ignore
+
     app.include_router(_verify_router)
 except Exception:
     # Keep the primary app running even if overlay imports fail
@@ -316,7 +348,7 @@ except Exception:
 def main():
     """
     Main function to start the FastAPI server.
-    
+
     This function:
     1. Gets the port from environment variable PORT (defaults to 8000)
     2. Starts the uvicorn ASGI server
@@ -324,14 +356,14 @@ def main():
     """
     # Get port from environment variable, default to 8000
     port = int(os.getenv("PORT", "8000"))
-    
+
     # Start the uvicorn server with the FastAPI app
     # Pass the app object directly to avoid import path issues when run as a script
     uvicorn.run(
-        app,               # FastAPI app instance
-        host="0.0.0.0",   # Listen on all available interfaces
-        port=port,         # Use the configured port
-        reload=True,       # Enable auto-reload for development
+        app,  # FastAPI app instance
+        host="0.0.0.0",  # Listen on all available interfaces
+        port=port,  # Use the configured port
+        reload=True,  # Enable auto-reload for development
     )
 
 
